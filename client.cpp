@@ -14,10 +14,12 @@ bool game_over = false;
 
 void receiveData(SOCKET sock, char* buffer, size_t bufferSize)
 {
+
     int valread = recv(sock, buffer, bufferSize, 0);
     if (valread == SOCKET_ERROR)
     {
         std::cerr << "Recv error: " << WSAGetLastError() << std::endl;
+
     }
     else
     {
@@ -39,15 +41,13 @@ void ReceiveUpdates(SOCKET socket)
     while (!game_over)
     {
         receiveData(socket, buffer, BUFFER_SIZE);
+
+        if (strncmp(buffer, "game_over", 10) == 0) {
+            std::cout << "Game ended. Disconnecting from the server.\n";
+            game_over = true;
+        }
         std::cout << buffer;
 
-        std::string message(buffer);
-        if (message == "Game Ended.") {
-            game_over = true;
-            std::cout << "Game ended. Disconnecting from the server.\n";
-            closesocket(socket);
-            break;
-        }
     }
 }
 
@@ -110,6 +110,8 @@ void ClientStart(const char* serverIp, int port)
         std::cout << "Client: Can start sending and receiving data..." << std::endl;
     }
     PlayGame(clientSocket);
+    closesocket(clientSocket);
+    WSACleanup();
 }
 
 
@@ -119,6 +121,7 @@ int main()
     while(true)
     {
         const char* serverIp = "127.0.0.1";
+        string ipString;
         int port = 55555;
         cout << "Selamat datang di alfamaret, selamat belanja" << endl;
         cout << "Berikut adalah perintah yang bisa anda lakukan ! " << endl;
@@ -131,8 +134,13 @@ int main()
         switch(clientConsoleCommand)
         {
         case 1:
-            cout << "Terasmbung ke server dengan IP 127.0.0.1 dan Port 55555" << endl;
+             cout << "Masukkan Ip Address : ";
+            cin >> ipString;
+            serverIp = ipString.c_str();
+            cout << "Server dimulai dengan ip : " << serverIp  << " dan dengan port " << port <<endl;
             ClientStart(serverIp, port);
+//            cout << "Terasmbung ke server dengan IP 127.0.0.1 dan Port 55555" << endl;
+//            ClientStart(serverIp, port);
             break;
         case 2:
             cout << "Terima kasih sudah berbelanja di alfamaret" << endl;
