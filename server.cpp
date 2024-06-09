@@ -112,6 +112,7 @@ void HandleClient(SOCKET socket,int playerID)
     {
         oppositeSocket = player1Socket;
     }
+
     while(!gameover)
     {
         if (playerTurn == playerID)
@@ -144,24 +145,31 @@ void HandleClient(SOCKET socket,int playerID)
             ++turn;
             if (checkWin((playerID == 1) ? 'X' : 'O'))
             {
-                cout << "Inside check win " << endl;
                 displayBoard(socket);
                 if(playerID == 1)
                 {
-                    displayBoard(oppositeSocket);
+                    UpdateBothBoard(player1Socket, player2Socket);
                     sendData(oppositeSocket, "Player 1 Win the game \n");
-                    sendData(oppositeSocket, "Game Ended.");
-                    sendData(socket, "Game Ended.");
-
+                    sendData(socket, "Player 1 Win the game \n");
+                    const char* messageEnd = "game_over";
+                    sendData(oppositeSocket, messageEnd);
+                    sendData(socket, messageEnd);
+                    cout << "Game Ended" << endl;
                 }
                 else if(playerID == 2)
                 {
-                    displayBoard(oppositeSocket);
+                    UpdateBothBoard(player1Socket,player2Socket);
                     sendData(oppositeSocket, "Player 2 Win The game \n");
-                    sendData(oppositeSocket, "Game Ended.");
-                    sendData(socket, "Game Ended.");
+                    sendData(socket, "Player 2 Win the game \n");
+                    const char* messageEnd = "game_over";
+                    sendData(oppositeSocket, messageEnd);
+                    sendData(socket, messageEnd);
+                    cout << "Game Ended" << endl;
+
                 }
                 gameover = true;
+//                closesocket(player1Socket);
+//                closesocket(player2Socket);
                 continue;
             }
             if (checkDraw())
@@ -172,6 +180,8 @@ void HandleClient(SOCKET socket,int playerID)
                 sendData(socket, "Game Ended.");
                 sendData(oppositeSocket, "Game Ended.");
                 gameover = true;
+//                closesocket(player1Socket);
+//                closesocket(player2Socket);
                 continue;
             }
             playerTurn = (playerID == 1) ? 2 : 1; // Switch turn
@@ -308,6 +318,7 @@ void ServerStop()
 int main()
 {
     const char* ipAddress = "127.0.0.1";
+    string ipString;
     int port = 55555;
 
     while(true)
@@ -324,8 +335,13 @@ int main()
         switch (serverConsoleCommand)
         {
         case 1:
-            cout << "Server dimulai dengan IP 127.0.0.1 dan port 55555" << endl;
+            cout << "Masukkan Ip Address : ";
+            cin >> ipString;
+            ipAddress = ipString.c_str();
+            cout << "Server dimulai dengan ip : " << ipAddress  << " dan dengan port " << port <<endl;
             ServerStart(ipAddress, port);
+//            cout << "Server dimulai dengan IP 127.0.0.1 dan port 55555" << endl;
+//            ServerStart(ipAddress, port);
             break;
         case 2:
             cout << "Anda memilih Perintah nomor 2" << endl;
