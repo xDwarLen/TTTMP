@@ -2,213 +2,342 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <thread>
+#pragma comment(lib, "Ws2_32.lib")
 
-#pragma comment(lib, "ws2_32.lib")
+using namespace std;
 
-#define DEFAULT_PORT "27015"
-#define DEFAULT_BUFLEN 512
+SOCKET serverSocket = INVALID_SOCKET;
+SOCKET acceptSocket = INVALID_SOCKET;
 
-char board[3][3] = { {' ', ' ', ' '}, {' ', ' ', ' '}, {' ', ' ', ' '} };
-char currentTurn = 'X'; // X starts the game
-bool gameStarted = false;
-bool gameEnded = false;
+SOCKET player1Socket;
+SOCKET player2Socket;
 
-// Function to print the Tic Tac Toe board
-void printBoard() {
-    std::cout << "  1 2 3\n";
-    for (int i = 0; i < 3; ++i) {
-        std::cout << i + 1 << " ";
-        for (int j = 0; j < 3; ++j) {
-            std::cout << board[i][j] << " ";
-        }
-        std::cout << "\n";
+char board[3][3] = {{' ', ' ', ' '}, {' ', ' ', ' '}, {' ', ' ', ' '}};
+bool gameover = false;
+int playerTurn = 0;
+int turn = 1;
+bool player1Notifiy;
+bool player2Notifiy;
+
+
+void receiveData(SOCKET client_socket, char* buffer, size_t bufferSize)
+{
+    int valread = recv(client_socket, buffer, bufferSize, 0);
+    if (valread == SOCKET_ERROR)
+    {
+        std::cerr << "Recv error: " << WSAGetLastError() << std::endl;
+    }
+    else
+    {
+        buffer[valread] = '\0';
+        cout << "Received data are = " << buffer << std::endl;
     }
 }
 
-// Function to check if someone wins
-bool checkWin() {
-    // Check rows and columns
-    for (int i = 0; i < 3; ++i) {
-        if (board[i][0] == board[i][1] && board[i][1] == board[i][2] && board[i][0] != ' ')
-            return true;
-        if (board[0][i] == board[1][i] && board[1][i] == board[2][i] && board[0][i] != ' ')
-            return true;
+void sendData(SOCKET client_socket, const char* message)
+{
+    if (send(client_socket, message, strlen(message), 0) == SOCKET_ERROR)
+    {
+        std::cerr << "Send error: " << WSAGetLastError() << std::endl;
     }
+    else
+    {
+        //cout << "Data sent to the client " << endl;
+    }
+}
 
+void displayBoard(SOCKET client_socket)
+{
+    std::string boardState = "Current Board:\n";
+    for (int i = 0; i < 3; ++i)
+    {
+        for (int j = 0; j < 3; ++j)
+        {
+            boardState += board[i][j];
+            if (j < 2)
+            {
+                boardState += " | ";
+            }
+        }
+        boardState += "\n";
+        if (i < 2)
+        {
+            boardState += "--+---+--\n";
+        }
+    }
+    sendData(client_socket, boardState.c_str());
+}
+bool checkWin(char player)
+{
+    // Check Horizontal vertical
+    for (int i = 0; i < 3; ++i)
+    {
+        if ((board[i][0] == player && board[i][1] == player && board[i][2] == player) ||
+                (board[0][i] == player && board[1][i] == player && board[2][i] == player))
+        {
+            return true;
+        }
+    }
     // Check diagonals
-    if ((board[0][0] == board[1][1] && board[1][1] == board[2][2] && board[0][0] != ' ') ||
-        (board[0][2] == board[1][1] && board[1][1] == board[2][0] && board[0][2] != ' '))
+    if ((board[0][0] == player && board[1][1] == player && board[2][2] == player) ||
+            (board[0][2] == player && board[1][1] == player && board[2][0] == player))
+    {
         return true;
-
+    }
     return false;
 }
 
-// Function to check if the game ends in a draw
-bool checkDraw() {
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 3; ++j)
-            if (board[i][j] == ' ')
-                return false;
-    return true;
+
+
+bool checkDraw()
+{
+    return !checkWin('X') && !checkWin('O') && turn == 9;
 }
 
-// Function to handle client communication
-// Adjust handleClient signature to accept both client sockets
-void handleClient(SOCKET clientSocket, SOCKET ClientSocket1, SOCKET ClientSocket2) {
-    int iResult;
-    char recvbuf[DEFAULT_BUFLEN];
-    int recvbuflen = DEFAULT_BUFLEN;
+void UpdateBothBoard(SOCKET socket1, SOCKET socket2 ){
+    displayBoard(socket1);
+    displayBoard(socket2);
+}
 
-    while (true) {
-        // Receive the move from the current player
-        iResult = recv(clientSocket, recvbuf, recvbuflen, 0);
-        if (iResult > 0) {
-            int row = recvbuf[0] - '0';
-            int col = recvbuf[1] - '0';
-
-            // Update the board
-            board[row][col] = (clientSocket == ClientSocket1) ? 'X' : 'O';
-
-            // Check for win or draw
-            if (checkWin()) {
-                // Send win message to both clients
-                char winMsg[3] = { 'W', (clientSocket == ClientSocket1) ? 'X' : 'O', '\0' };
-                send(ClientSocket1, winMsg, sizeof(winMsg), 0);
-                send(ClientSocket2, winMsg, sizeof(winMsg), 0);
-                gameEnded = true;
-                break;
-            } else if (checkDraw()) {
-                // Send draw message to both clients
-                char drawMsg[2] = { 'D', '\0' };
-                send(ClientSocket1, drawMsg, sizeof(drawMsg), 0);
-                send(ClientSocket2, drawMsg, sizeof(drawMsg), 0);
-                gameEnded = true;
-                break;
+void HandleClient(SOCKET socket,int playerID)
+{
+    char buffer[200];
+    const char* request = "Your turn.";
+    SOCKET oppositeSocket;
+    if(playerID == 1)
+    {
+        oppositeSocket = player2Socket;
+    }
+    else if (playerID == 2)
+    {
+        oppositeSocket = player1Socket;
+    }
+    while(!gameover)
+    {
+        if (playerTurn == playerID)
+        {
+            if(playerID == 1 && player1Notifiy == true)
+            {
+                player1Notifiy = false;
             }
+            else if(playerID == 2 && player2Notifiy == true)
+            {
+                player2Notifiy = false;
+            }
+//            displayBoard(socket);
+            UpdateBothBoard(player1Socket, player2Socket);
+            sendData(socket, "Giliran anda. Masukkan baris yang ingin di isi(0, 1, 2): ");
+            receiveData(socket, buffer, 200);
+            int row = atoi(buffer);
 
-            // Send the updated board to both clients
-            for (SOCKET client : {ClientSocket1, ClientSocket2}) {
-                int sendResult = send(client, reinterpret_cast<char*>(board), sizeof(board), 0);
-                if (sendResult == SOCKET_ERROR) {
-                    std::cout << "send failed: " << WSAGetLastError() << "\n";
-                    closesocket(client);
-                    return;
+            sendData(socket, "Masukkan Kolom yang ingin di isi (0, 1, 2): ");
+            receiveData(socket, buffer, 200);
+            int col = atoi(buffer);
+
+            // Validate client input / Validate Client Move
+            if (row < 0 || row >= 3 || col < 0 || col >= 3 || board[row][col] != ' ')
+            {
+                sendData(socket, "Invalid move. Try again.\n");
+                continue;
+            }
+            board[row][col] = (playerID == 1) ? 'X' : 'O';
+            ++turn;
+            if (checkWin((playerID == 1) ? 'X' : 'O'))
+            {
+                cout << "Inside check win " << endl;
+                displayBoard(socket);
+                if(playerID == 1)
+                {
+                    displayBoard(oppositeSocket);
+                    sendData(oppositeSocket, "Player 1 Win the game \n");
+                    sendData(oppositeSocket, "Game Ended.");
+                    sendData(socket, "Game Ended.");
+
                 }
+                else if(playerID == 2)
+                {
+                    displayBoard(oppositeSocket);
+                    sendData(oppositeSocket, "Player 2 Win The game \n");
+                    sendData(oppositeSocket, "Game Ended.");
+                    sendData(socket, "Game Ended.");
+                }
+                gameover = true;
+                continue;
+            }
+            if (checkDraw())
+            {
+                displayBoard(socket);
+                sendData(socket, "It's a draw!\n");
+                sendData(oppositeSocket, "It's a draw!\n");
+                sendData(socket, "Game Ended.");
+                sendData(oppositeSocket, "Game Ended.");
+                gameover = true;
+                continue;
+            }
+            playerTurn = (playerID == 1) ? 2 : 1; // Switch turn
+
+        }
+        else
+        {
+            if(playerID == 1 && player1Notifiy == false)
+            {
+                sendData(socket,"Its Opposite player turn ... \n");
+                player1Notifiy = true;
+            }
+            else if(playerID == 2 && player2Notifiy == false)
+            {
+                sendData(socket,"Its Opposite player turn ... \n");
+                player2Notifiy = true;
             }
         }
     }
+}
 
-    closesocket(clientSocket);
+SOCKET AcceptConnection(SOCKET socket)
+{
+    SOCKET newSocket = accept(socket, NULL, NULL);
+    if (newSocket == INVALID_SOCKET)
+    {
+        std::cerr << "Accept failed: " << WSAGetLastError() << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    return newSocket;
 }
 
 
-int main() {
-    WSADATA wsaData;
-    int iResult;
-
-    SOCKET ListenSocket = INVALID_SOCKET;
-    SOCKET ClientSocket1 = INVALID_SOCKET;
-    SOCKET ClientSocket2 = INVALID_SOCKET;
-
-    struct addrinfo* result = NULL;
-    struct addrinfo hints;
-
-    int iSendResult;
-    char recvbuf[DEFAULT_BUFLEN];
-    int recvbuflen = DEFAULT_BUFLEN;
-
-    // Initialize Winsock
-    iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (iResult != 0) {
-        std::cout << "WSAStartup failed: " << iResult << "\n";
-        return 1;
+bool ServerStart(const char* ipAddress, int port)
+{
+    WSAData wsaData;
+    int wsaerr;
+    WORD wVersionRequested = MAKEWORD(2,2);
+    wsaerr = WSAStartup(wVersionRequested, &wsaData);
+    // Check for initialization success
+    if (wsaerr != 0)
+    {
+        std::cout << "The Winsock dll not found!" << std::endl;
+        return 0;
     }
+    else
+    {
+        std::cout << "The Winsock dll found" << std::endl;
+        std::cout << "The status: " << wsaData.szSystemStatus << std::endl;
+    }
+//    return 0;
+    // Create a socket
+//    SOCKET serverSocket;
+    serverSocket = INVALID_SOCKET;
+    serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    ZeroMemory(&hints, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    hints.ai_flags = AI_PASSIVE;
-
-    // Resolve the server address and port
-    iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &result);
-    if (iResult != 0) {
-        std::cout << "getaddrinfo failed: " << iResult << "\n";
+    // Check for socket creation success
+    if (serverSocket == INVALID_SOCKET)
+    {
+        std::cout << "Error at socket(): " << WSAGetLastError() << std::endl;
         WSACleanup();
-        return 1;
+        return false;
     }
+    else
+    {
+        std::cout << "Socket is OK!" << std::endl;
+    }
+    // Bind the socket to an IP address and port number
+    sockaddr_in service;
+    service.sin_family = AF_INET;
+//    service.sin_addr.s_addr = inet_addr("127.0.0.1");  // Replace with your desired IP address
+    service.sin_addr.s_addr = inet_addr(ipAddress);
+    service.sin_port = htons(port);  // Choose a port number
 
-    // Create a SOCKET for the server to listen for client connections
-    ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-    if (ListenSocket == INVALID_SOCKET) {
-        std::cout << "Error at socket(): " << WSAGetLastError() << "\n";
-        freeaddrinfo(result);
+    // Use the bind function
+    if (bind(serverSocket, reinterpret_cast<SOCKADDR*>(&service), sizeof(service)) == SOCKET_ERROR)
+    {
+        std::cout << "bind() failed: " << WSAGetLastError() << std::endl;
+        closesocket(serverSocket);
         WSACleanup();
-        return 1;
+        return false;
+    }
+    else
+    {
+        std::cout << "bind() is OK!" << std::endl;
+    }
+    // Listen for incoming connections
+    if (listen(serverSocket, 1) == SOCKET_ERROR)
+    {
+        std::cout << "listen(): Error listening on socket: " << WSAGetLastError() << std::endl;
+//        closesocket(serverSocket);
+//        WSACleanup();
+//        return false;
+    }
+    else
+    {
+        std::cout << "listen() is OK! I'm waiting for new connections..." << std::endl;
     }
 
-    // Bind the socket
-    iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
-    if (iResult == SOCKET_ERROR) {
-        std::cout << "bind failed: " << WSAGetLastError() << "\n";
-        freeaddrinfo(result);
-        closesocket(ListenSocket);
-        WSACleanup();
-        return 1;
+    player1Socket = AcceptConnection(serverSocket);
+    cout << "First Player Connected , Waiting for Second player ..." << endl;
+    sendData(player1Socket, "Anda Terdaftar Sebagai Player 1 \n");
+
+    player2Socket = AcceptConnection(serverSocket);
+    cout << "Second Player Connected, Game Starting..." << endl;
+    sendData(player2Socket, "Anda Terdaftar Sebagai Player 2 \n");
+    playerTurn = 1;
+
+    std::thread t1(HandleClient, player1Socket, 1);
+    std::thread t2(HandleClient, player2Socket, 2);
+
+    t1.join();
+    t2.join();
+
+}
+
+
+void ServerStop()
+{
+    if(acceptSocket != INVALID_SOCKET)
+    {
+        shutdown(acceptSocket, SD_BOTH);
+        closesocket(acceptSocket);
     }
-
-    freeaddrinfo(result);
-
-    // Listen for client connections
-    iResult = listen(ListenSocket, SOMAXCONN);
-    if (iResult == SOCKET_ERROR) {
-        std::cout << "listen failed: " << WSAGetLastError() << "\n";
-        closesocket(ListenSocket);
-        WSACleanup();
-        return 1;
+    if(serverSocket != INVALID_SOCKET)
+    {
+        closesocket(serverSocket);
     }
-
-    std::cout << "Waiting for clients to connect...\n";
-
-    // Accept the first client connection
-    ClientSocket1 = accept(ListenSocket, NULL, NULL);
-    if (ClientSocket1 == INVALID_SOCKET) {
-        std::cout << "accept failed: " << WSAGetLastError() << "\n";
-        closesocket(ListenSocket);
-        WSACleanup();
-        return 1;
-    }
-
-    std::cout << "Player X connected!\n";
-
-    // Accept the second client connection
-    ClientSocket2 = accept(ListenSocket, NULL, NULL);
-    if (ClientSocket2 == INVALID_SOCKET) {
-        std::cout << "accept failed: " << WSAGetLastError() << "\n";
-        closesocket(ListenSocket);
-        WSACleanup();
-        return 1;
-    }
-
-    std::cout << "Player O connected!\n";
-
-    // Set the game as started
-    gameStarted = true;
-
-    // Start a thread for each client to handle communication
-    std::thread thread1(handleClient, ClientSocket1, ClientSocket1, ClientSocket2);
-    std::thread thread2(handleClient, ClientSocket2, ClientSocket1, ClientSocket2);
-
-
-    // Join the threads with the main thread
-    thread1.join();
-    thread2.join();
-
-    // Clean up
-    closesocket(ClientSocket1);
-    closesocket(ClientSocket2);
-    closesocket(ListenSocket);
     WSACleanup();
+    cout << "Server Stopped and cleaned up." << endl;
+}
 
-    return 0;
+
+int main()
+{
+    const char* ipAddress = "127.0.0.1";
+    int port = 55555;
+
+    while(true)
+    {
+        cout << "Selamat datang di Indomaret, selamat belanja" << endl;
+        cout << "Berikut adalah perintah yang bisa anda lakukan ! " << endl;
+        cout << "1. Mulai Server" << endl;
+        cout << "2. Stop Server"<< endl;
+        cout << "3. Keluar"<< endl;
+        cout << "Silahkan masukkan perintah yang ingin anda lakukan : ";
+        int serverConsoleCommand;
+        cin >> serverConsoleCommand;
+
+        switch (serverConsoleCommand)
+        {
+        case 1:
+            cout << "Server dimulai dengan IP 127.0.0.1 dan port 55555" << endl;
+            ServerStart(ipAddress, port);
+            break;
+        case 2:
+            cout << "Anda memilih Perintah nomor 2" << endl;
+            break;
+        case 3:
+            cout << "Anda memilih perintah nomor 3" << endl;
+            cout << "Terima kasih sudah berbelanja di indomaret" << endl;
+            return 0;
+            break;
+        default:
+            cout << "anda memasukkan input yang tidak ada di dalam list!" << endl;
+        }
+
+    }
 }
